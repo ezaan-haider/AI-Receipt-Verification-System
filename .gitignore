@@ -1,0 +1,5 @@
+.env
+__pycache__
+__init.py
+backend/uploads/*.jpeg
+backend/uploads/preprocessed/
