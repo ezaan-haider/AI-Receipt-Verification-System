@@ -1,0 +1,75 @@
+services:
+  database:
+    image: postgres:17-alpine
+    container_name: receipt_database
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+
+    container_name: receipt_backend
+    restart: unless-stopped
+
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL_NAME: ${GEMINI_MODEL_NAME}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES}
+      UPLOAD_DIR: ${UPLOAD_DIR}
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_FULL_NAME: ${ADMIN_FULL_NAME}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      EMPLOYEE_USERNAME: ${EMPLOYEE_USERNAME}
+      EMPLOYEE_FULL_NAME: ${EMPLOYEE_FULL_NAME}
+      EMPLOYEE_PASSWORD: ${EMPLOYEE_PASSWORD}
+
+    ports:
+      - "8000:8000"
+
+    volumes:
+      - receipt_uploads:/app/uploads
+
+    depends_on:
+      database:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+
+    container_name: receipt_frontend
+    restart: unless-stopped
+
+    environment:
+      API_BASE_URL: ${API_BASE_URL}
+
+    ports:
+      - "8501:8501"
+
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  receipt_uploads:

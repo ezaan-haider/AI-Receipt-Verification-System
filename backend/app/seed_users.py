@@ -1,3 +1,5 @@
+import os
+
 from app import models
 from app.auth import hash_password
 from app.database import SessionLocal
@@ -41,15 +43,24 @@ def create_user(
 
 if __name__ == "__main__":
     create_user(
-        username="admin",
-        full_name="System Administrator",
-        password="Admin123!",
+        username=os.getenv("ADMIN_USERNAME", "admin"),
+        full_name=os.getenv(
+            "ADMIN_FULL_NAME",
+            "System Administrator",
+        ),
+        password=os.environ["ADMIN_PASSWORD"],
         role="ADMIN",
     )
 
     create_user(
-        username="employee",
-        full_name="Demo Employee",
-        password="Employee123!",
+        username=os.getenv(
+            "EMPLOYEE_USERNAME",
+            "employee",
+        ),
+        full_name=os.getenv(
+            "EMPLOYEE_FULL_NAME",
+            "Demo Employee",
+        ),
+        password=os.environ["EMPLOYEE_PASSWORD"],
         role="EMPLOYEE",
     )
