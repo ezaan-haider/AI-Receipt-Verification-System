@@ -1,27 +1,4 @@
 services:
-  database:
-    image: postgres:17-alpine
-    container_name: receipt_database
-    restart: unless-stopped
-
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}",
-        ]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   backend:
     build:
       context: ./backend
@@ -37,9 +14,14 @@ services:
       JWT_ALGORITHM: ${JWT_ALGORITHM}
       JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES}
       UPLOAD_DIR: ${UPLOAD_DIR}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
+
       ADMIN_USERNAME: ${ADMIN_USERNAME}
       ADMIN_FULL_NAME: ${ADMIN_FULL_NAME}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+
       EMPLOYEE_USERNAME: ${EMPLOYEE_USERNAME}
       EMPLOYEE_FULL_NAME: ${EMPLOYEE_FULL_NAME}
       EMPLOYEE_PASSWORD: ${EMPLOYEE_PASSWORD}
@@ -49,10 +31,6 @@ services:
 
     volumes:
       - receipt_uploads:/app/uploads
-
-    depends_on:
-      database:
-        condition: service_healthy
 
   frontend:
     build:
@@ -71,5 +49,4 @@ services:
       - backend
 
 volumes:
-  postgres_data:
   receipt_uploads:

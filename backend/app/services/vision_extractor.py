@@ -87,19 +87,16 @@ Extraction rules:
 """
 
 
-def extract_receipt_from_image(image_path: str) -> ReceiptExtraction:
-    path = Path(image_path)
-
-    if not path.exists():
-        raise FileNotFoundError(f"Receipt image not found: {image_path}")
-
-    image_bytes = path.read_bytes()
-    mime_type = _get_mime_type(path.suffix)
-
+def extract_receipt_from_image(
+    image_bytes: bytes,
+    mime_type: str,
+) -> ReceiptExtraction:
     response = client.models.generate_content(
         model=MODEL_NAME,
         contents=[
-            types.Part.from_text(text=EXTRACTION_PROMPT),
+            types.Part.from_text(
+                text=EXTRACTION_PROMPT
+            ),
             types.Part.from_bytes(
                 data=image_bytes,
                 mime_type=mime_type,
@@ -116,9 +113,13 @@ def extract_receipt_from_image(image_path: str) -> ReceiptExtraction:
         return response.parsed
 
     if not response.text:
-        raise ValueError("Gemini returned no extraction result")
+        raise ValueError(
+            "Gemini returned no extraction result"
+        )
 
-    return ReceiptExtraction.model_validate_json(response.text)
+    return ReceiptExtraction.model_validate_json(
+        response.text
+    )
 
 
 def _get_mime_type(extension: str) -> str:
@@ -135,3 +136,14 @@ def _get_mime_type(extension: str) -> str:
         raise ValueError(f"Unsupported image format: {extension}")
 
     return mime_types[extension]
+
+def _mime_type_from_url(image_url: str) -> str:
+    clean_url = image_url.split("?")[0].lower()
+
+    if clean_url.endswith(".png"):
+        return "image/png"
+
+    if clean_url.endswith(".webp"):
+        return "image/webp"
+
+    return "image/jpeg"

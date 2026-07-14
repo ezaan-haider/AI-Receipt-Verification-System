@@ -55,6 +55,7 @@ class Receipt(Base):
     claim_amount = Column(Float, nullable=False)
 
     image_path = Column(String(255), nullable=False)
+    image_public_id = Column(String(255), nullable=True, index=True)
     image_hash = Column(String(255), nullable=True, index=True)
 
     image_quality_score = Column(Float, nullable=True)

@@ -1,5 +1,8 @@
 import hashlib
 
+def calculate_bytes_hash(file_bytes: bytes) -> str:
+    return hashlib.sha256(file_bytes).hexdigest()
+
 
 def calculate_file_hash(file_path: str) -> str:
     sha256_hash = hashlib.sha256()

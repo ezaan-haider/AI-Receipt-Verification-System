@@ -4,6 +4,7 @@ import streamlit as st
 from api_client import (
     API_BASE_URL,
     APIError,
+    delete_receipt,
     get_all_receipts,
     get_my_receipts,
     get_receipt,
@@ -384,6 +385,7 @@ def render_receipt_detail(
 
     if admin:
         render_admin_review(receipt)
+        render_delete_receipt(receipt)
 
 
 def render_admin_review(receipt: dict):
@@ -451,6 +453,44 @@ def render_admin_review(receipt: dict):
         except APIError as exc:
             st.error(str(exc))
 
+def render_delete_receipt(receipt: dict):
+    st.divider()
+    st.subheader("Delete receipt")
+
+    st.warning(
+        "This permanently deletes the receipt record and its Cloudinary image."
+    )
+
+    confirm_delete = st.checkbox(
+        "I understand this action cannot be undone.",
+        key=f"confirm_delete_{receipt['id']}",
+    )
+
+    if st.button(
+        "Delete receipt permanently",
+        type="primary",
+        use_container_width=True,
+        disabled=not confirm_delete,
+        key=f"delete_receipt_{receipt['id']}",
+    ):
+        try:
+            result = delete_receipt(
+                token=st.session_state.token,
+                receipt_id=receipt["id"],
+            )
+
+            st.success(result["message"])
+
+            # Remove stale receipt selection and refresh dashboard
+            st.rerun()
+
+        except APIError as exc:
+            st.error(str(exc))
+
+        except Exception:
+            st.error(
+                "The receipt could not be deleted."
+            )
 
 def render_admin_dashboard():
     st.title("Admin Dashboard")

@@ -1,7 +1,6 @@
 import os
-import shutil
 import time
-from uuid import uuid4
+import requests
 
 from datetime import datetime, timezone
 
@@ -15,6 +14,7 @@ from app.dependencies import (
     get_current_user,
     require_admin,
 )
+from app.services.storage import delete_receipt
 
 from fastapi import (
     FastAPI,
@@ -24,19 +24,41 @@ from fastapi import (
     Depends,
     HTTPException,
 )
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import engine, Base, get_db
 from app.services.duplicate import (
-    calculate_file_hash,
+    calculate_bytes_hash,
     find_duplicate_by_hash,
     find_possible_duplicate_by_fields,
 )
-from app.services.image_quality import assess_image_quality
+from app.services.image_quality import (
+    assess_image_quality_bytes,
+)
+
+from app.services.storage import (
+    delete_receipt,
+    download_receipt_bytes,
+    upload_receipt,
+)
 from app.services.verifier import verify_receipt
 from app.services.vision_extractor import extract_receipt_from_image
+from app.services.storage import upload_receipt
+
+
+def get_image_mime_type(image_url: str) -> str:
+    clean_url = image_url.split("?")[0].lower()
+
+    if clean_url.endswith(".png"):
+        return "image/png"
+
+    if clean_url.endswith(".webp"):
+        return "image/webp"
+
+    return "image/jpeg"
+
+
 
 app = FastAPI(
     title="AI Receipt Verification API",
@@ -44,11 +66,6 @@ app = FastAPI(
 )
 
 Base.metadata.create_all(bind=engine)
-
-UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
-
 
 @app.get("/")
 def root():
@@ -121,11 +138,14 @@ def submit_receipt(
     current_user: models.User = Depends(get_current_user),
 ):
     if claim_amount <= 0:
-        raise HTTPException(status_code=400, detail="Claim amount must be greater than 0")
+        raise HTTPException(
+            status_code=400,
+            detail="Claim amount must be greater than 0",
+        )
 
     allowed_extensions = [".jpg", ".jpeg", ".png", ".webp"]
-    original_filename = receipt_image.filename or ""
 
+    original_filename = receipt_image.filename or ""
     file_extension = os.path.splitext(original_filename)[1].lower()
 
     if file_extension not in allowed_extensions:
@@ -134,26 +154,57 @@ def submit_receipt(
             detail="Only JPG, JPEG, PNG, and WEBP files are allowed",
         )
 
-    unique_filename = f"{uuid4()}{file_extension}"
-    file_path = os.path.join(UPLOAD_DIR, unique_filename)
+    file_bytes = receipt_image.file.read()
 
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(receipt_image.file, buffer)
+    if not file_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail="Uploaded file is empty",
+        )
 
-    image_hash = calculate_file_hash(file_path)
+    image_hash = calculate_bytes_hash(file_bytes)
+
+    try:
+        upload_result = upload_receipt(
+            file_bytes=file_bytes,
+            filename=original_filename,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Cloudinary image upload failed: {exc}",
+        ) from exc
 
     new_receipt = models.Receipt(
         employee_name=current_user.full_name,
         submitted_by_id=current_user.id,
         claim_amount=claim_amount,
-        image_path=file_path,
+        image_path=upload_result["url"],
+        image_public_id=upload_result["public_id"],
         image_hash=image_hash,
         verification_status="PENDING",
     )
 
-    db.add(new_receipt)
-    db.commit()
-    db.refresh(new_receipt)
+    try:
+        db.add(new_receipt)
+        db.commit()
+        db.refresh(new_receipt)
+
+    except Exception as exc:
+        db.rollback()
+
+        # Prevent orphaned Cloudinary image if database insert fails
+        try:
+            from app.services.storage import delete_receipt
+
+            delete_receipt(upload_result["public_id"])
+        except Exception:
+            pass
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Receipt could not be saved: {exc}",
+        ) from exc
 
     return new_receipt
 
@@ -217,22 +268,44 @@ def get_receipt(
 
 
 @app.delete("/receipts/{receipt_id}")
-def delete_receipt(
-    receipt_id: int, db: Session = Depends(get_db),
+def delete_receipt_endpoint(
+    receipt_id: int,
+    db: Session = Depends(get_db),
     admin: models.User = Depends(require_admin),
 ):
-    receipt = db.query(models.Receipt).filter(models.Receipt.id == receipt_id).first()
+    receipt = (
+        db.query(models.Receipt)
+        .filter(models.Receipt.id == receipt_id)
+        .first()
+    )
 
     if not receipt:
-        raise HTTPException(status_code=404, detail="Receipt not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Receipt not found",
+        )
 
-    if receipt.image_path and os.path.exists(receipt.image_path):
-        os.remove(receipt.image_path)
+    try:
+        # Delete the cloud image first
+        if receipt.image_public_id:
+            delete_receipt(receipt.image_public_id)
 
-    db.delete(receipt)
-    db.commit()
+        # Delete the database record
+        db.delete(receipt)
+        db.commit()
 
-    return {"message": "Receipt deleted successfully"}
+        return {
+            "message": "Receipt deleted successfully",
+            "receipt_id": receipt_id,
+        }
+
+    except Exception as exc:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Receipt deletion failed: {exc}",
+        ) from exc
 
 @app.post("/receipts/{receipt_id}/process")
 def process_receipt(
@@ -261,40 +334,78 @@ def process_receipt(
             detail="You cannot process this receipt",
         )
 
-    # Keep the remainder of your existing processing code.
+    if not receipt.image_path:
+        raise HTTPException(
+            status_code=404,
+            detail="Receipt image URL is missing",
+        )
 
     process_started = time.perf_counter()
 
     try:
-        # 1. Assess image quality
-        quality_result = assess_image_quality(receipt.image_path)
+        # 1. Download image bytes from Cloudinary
+        image_bytes = download_receipt_bytes(
+            receipt.image_path
+        )
 
-        receipt.image_quality_score = quality_result["score"]
+        if not image_bytes:
+            raise ValueError(
+                "Downloaded receipt image is empty"
+            )
+
+        # 2. Assess image quality using downloaded bytes
+        quality_result = assess_image_quality_bytes(
+            image_bytes
+        )
+
+        receipt.image_quality_score = (
+            quality_result["score"]
+        )
+
         receipt.image_quality_flags = (
             ", ".join(quality_result["flags"])
             if quality_result["flags"]
             else None
         )
 
-        # 2. Extract fields directly from the image using Gemini Vision
-        vision_result = extract_receipt_from_image(receipt.image_path)
+        # 3. Send the image bytes directly to Gemini Vision
+        mime_type = get_image_mime_type(
+            receipt.image_path
+        )
 
-        receipt.receipt_text = vision_result.receipt_text
+        vision_result = extract_receipt_from_image(
+            image_bytes=image_bytes,
+            mime_type=mime_type,
+        )
+
+        receipt.receipt_text = (
+            vision_result.receipt_text
+        )
         receipt.vendor = vision_result.vendor
-        receipt.receipt_date = vision_result.receipt_date
-        receipt.extracted_total = vision_result.extracted_total
+        receipt.receipt_date = (
+            vision_result.receipt_date
+        )
+        receipt.extracted_total = (
+            vision_result.extracted_total
+        )
         receipt.currency = vision_result.currency
-        receipt.receipt_number = vision_result.receipt_number
+        receipt.receipt_number = (
+            vision_result.receipt_number
+        )
 
-        receipt.extraction_confidence = vision_result.extraction_confidence
+        receipt.extraction_confidence = (
+            vision_result.extraction_confidence
+        )
+
         receipt.extraction_warnings = (
             ", ".join(vision_result.warnings)
             if vision_result.warnings
             else None
         )
+
         receipt.extraction_method = "GEMINI_VISION"
 
-        # 3. Check for duplicates
+        # 4. Duplicate detection
         exact_duplicate = find_duplicate_by_hash(
             db=db,
             ReceiptModel=models.Receipt,
@@ -302,42 +413,58 @@ def process_receipt(
             current_receipt_id=receipt.id,
         )
 
-        possible_duplicate = find_possible_duplicate_by_fields(
-            db=db,
-            ReceiptModel=models.Receipt,
-            vendor=receipt.vendor,
-            receipt_date=receipt.receipt_date,
-            extracted_total=receipt.extracted_total,
-            current_receipt_id=receipt.id,
+        possible_duplicate = (
+            find_possible_duplicate_by_fields(
+                db=db,
+                ReceiptModel=models.Receipt,
+                vendor=receipt.vendor,
+                receipt_date=receipt.receipt_date,
+                extracted_total=receipt.extracted_total,
+                current_receipt_id=receipt.id,
+            )
         )
 
-        # 4. Apply deterministic verification rules
+        # 5. Deterministic verification
         verification = verify_receipt(
             claim_amount=receipt.claim_amount,
             extracted_total=receipt.extracted_total,
             receipt_date=receipt.receipt_date,
-            extraction_confidence=receipt.extraction_confidence,
-            image_quality_score=receipt.image_quality_score,
-            image_quality_flags=receipt.image_quality_flags,
+            extraction_confidence=(
+                receipt.extraction_confidence
+            ),
+            image_quality_score=(
+                receipt.image_quality_score
+            ),
+            image_quality_flags=(
+                receipt.image_quality_flags
+            ),
         )
 
         if exact_duplicate:
             receipt.verification_status = "REJECTED"
             receipt.verification_reason = (
                 "Exact duplicate image detected. "
-                f"Matches receipt ID {exact_duplicate.id}."
+                f"Matches receipt ID "
+                f"{exact_duplicate.id}."
             )
 
         elif possible_duplicate:
-            receipt.verification_status = "NEEDS_REVIEW"
+            receipt.verification_status = (
+                "NEEDS_REVIEW"
+            )
             receipt.verification_reason = (
                 "Possible duplicate receipt detected. "
-                f"Similar to receipt ID {possible_duplicate.id}."
+                f"Similar to receipt ID "
+                f"{possible_duplicate.id}."
             )
 
         else:
-            receipt.verification_status = verification["status"]
-            receipt.verification_reason = verification["reason"]
+            receipt.verification_status = (
+                verification["status"]
+            )
+            receipt.verification_reason = (
+                verification["reason"]
+            )
 
         receipt.processing_time_seconds = round(
             time.perf_counter() - process_started,
@@ -351,24 +478,53 @@ def process_receipt(
             "id": receipt.id,
             "vendor": receipt.vendor,
             "receipt_date": receipt.receipt_date,
-            "extracted_total": receipt.extracted_total,
+            "extracted_total": (
+                receipt.extracted_total
+            ),
             "currency": receipt.currency,
-            "receipt_number": receipt.receipt_number,
-            "extraction_confidence": receipt.extraction_confidence,
-            "extraction_warnings": receipt.extraction_warnings,
-            "extraction_method": receipt.extraction_method,
-            "image_quality_score": receipt.image_quality_score,
-            "image_quality_flags": receipt.image_quality_flags,
-            "verification_status": receipt.verification_status,
-            "verification_reason": receipt.verification_reason,
-            "processing_time_seconds": receipt.processing_time_seconds,
+            "receipt_number": (
+                receipt.receipt_number
+            ),
+            "extraction_confidence": (
+                receipt.extraction_confidence
+            ),
+            "extraction_warnings": (
+                receipt.extraction_warnings
+            ),
+            "extraction_method": (
+                receipt.extraction_method
+            ),
+            "image_quality_score": (
+                receipt.image_quality_score
+            ),
+            "image_quality_flags": (
+                receipt.image_quality_flags
+            ),
+            "verification_status": (
+                receipt.verification_status
+            ),
+            "verification_reason": (
+                receipt.verification_reason
+            ),
+            "processing_time_seconds": (
+                receipt.processing_time_seconds
+            ),
         }
 
-    except HTTPException:
-        raise
+    except requests.RequestException as exc:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Could not download the receipt "
+                f"from Cloudinary: {exc}"
+            ),
+        ) from exc
 
     except Exception as exc:
         db.rollback()
+
         raise HTTPException(
             status_code=500,
             detail=f"Receipt processing failed: {exc}",

@@ -86,6 +86,8 @@ class ReceiptDetailResponse(BaseModel):
 
     image_quality_score: Optional[float] = None
     image_quality_flags: Optional[str] = None
+    image_public_id: Optional[str] = None
+    image_url: Optional[str] = None
 
     receipt_text: Optional[str] = None
 

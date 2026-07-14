@@ -1,15 +1,28 @@
 import cv2
+import numpy as np
 
 
-def assess_image_quality(image_path: str):
-    image = cv2.imread(image_path)
+def assess_image_quality_bytes(image_bytes: bytes) -> dict:
+    image_array = np.frombuffer(
+        image_bytes,
+        dtype=np.uint8,
+    )
+
+    image = cv2.imdecode(
+        image_array,
+        cv2.IMREAD_COLOR,
+    )
 
     if image is None:
         return {
             "score": 0,
-            "flags": ["Could not read image"],
+            "flags": ["Could not decode image"],
         }
 
+    return assess_loaded_image(image)
+
+
+def assess_loaded_image(image) -> dict:
     flags = []
     score = 100
 
@@ -19,14 +32,22 @@ def assess_image_quality(image_path: str):
         flags.append("Low resolution image")
         score -= 25
 
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(
+        image,
+        cv2.COLOR_BGR2GRAY,
+    )
 
-    blur_score = cv2.Laplacian(gray, cv2.CV_64F).var()
+    blur_score = cv2.Laplacian(
+        gray,
+        cv2.CV_64F,
+    ).var()
+
     if blur_score < 80:
         flags.append("Image appears blurry")
         score -= 30
 
     brightness = gray.mean()
+
     if brightness < 60:
         flags.append("Image appears too dark")
         score -= 20
@@ -35,13 +56,12 @@ def assess_image_quality(image_path: str):
         score -= 20
 
     contrast = gray.std()
+
     if contrast < 35:
         flags.append("Low contrast image")
         score -= 20
 
-    score = max(score, 0)
-
     return {
-        "score": round(score, 2),
+        "score": max(round(score, 2), 0),
         "flags": flags,
     }

@@ -77,6 +77,17 @@ def submit_receipt(
 
     return _handle_response(response)
 
+def delete_receipt(
+    token: str,
+    receipt_id: int,
+) -> dict:
+    response = requests.delete(
+        f"{API_BASE_URL}/receipts/{receipt_id}",
+        headers=_headers(token),
+        timeout=REQUEST_TIMEOUT,
+    )
+
+    return _handle_response(response)
 
 def process_receipt(
     token: str,
