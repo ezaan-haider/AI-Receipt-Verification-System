@@ -6,13 +6,8 @@ def verify_receipt(
     extracted_total: float | None,
     receipt_date: str | None,
     extraction_confidence: float | None,
-    image_quality_score: float | None = None,
-    image_quality_flags: str | None = None,
 ):
     reasons = []
-
-    if image_quality_score is not None and image_quality_score < 60:
-        reasons.append(f"Poor image quality: {image_quality_flags}.")
 
     if extraction_confidence is None or extraction_confidence < 0.70:
         reasons.append("Low extraction confidence.")

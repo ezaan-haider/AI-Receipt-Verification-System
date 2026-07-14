@@ -1,10 +1,30 @@
-.env
-__pycache__
-__init.py
-backend/uploads/*.jpeg
-backend/uploads/preprocessed/
+# Secrets
 .env
 backend/.env
 frontend/.env
-**/__pycache__/
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+venv/
+.venv/
+backend/venv/
+frontend/venv/
+
+# Local files
 backend/uploads/
+uploads/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

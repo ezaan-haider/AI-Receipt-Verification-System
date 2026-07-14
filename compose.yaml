@@ -8,12 +8,14 @@ services:
 
     environment:
       DATABASE_URL: ${DATABASE_URL}
+
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       GEMINI_MODEL_NAME: ${GEMINI_MODEL_NAME}
+
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       JWT_ALGORITHM: ${JWT_ALGORITHM}
       JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES}
-      UPLOAD_DIR: ${UPLOAD_DIR}
+
       CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
       CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
       CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
@@ -28,9 +30,6 @@ services:
 
     ports:
       - "8000:8000"
-
-    volumes:
-      - receipt_uploads:/app/uploads
 
   frontend:
     build:
@@ -47,6 +46,3 @@ services:
 
     depends_on:
       - backend
-
-volumes:
-  receipt_uploads:

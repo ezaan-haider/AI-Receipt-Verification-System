@@ -1,10 +1,8 @@
-from pydantic import BaseModel
-from typing import Optional
-
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
 
 
 class TokenResponse(BaseModel):
@@ -17,13 +15,12 @@ class TokenResponse(BaseModel):
 
 
 class CurrentUserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     username: str
     full_name: str
     role: str
-
-    class Config:
-        from_attributes = True
 
 
 class AdminReviewRequest(BaseModel):
@@ -48,17 +45,18 @@ class AdminReviewResponse(BaseModel):
     reviewed_by: str
 
 class ReceiptResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     employee_name: str
     claim_amount: float
     image_path: str
     verification_status: str
 
-    class Config:
-        from_attributes = True
-
 
 class ReceiptListResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     employee_name: str
     claim_amount: float
@@ -74,10 +72,9 @@ class ReceiptListResponse(BaseModel):
     extraction_confidence: Optional[float] = None
     processing_time_seconds: Optional[float] = None
 
-    class Config:
-        from_attributes = True
-
 class ReceiptDetailResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     employee_name: str
     claim_amount: float
@@ -107,6 +104,3 @@ class ReceiptDetailResponse(BaseModel):
     reviewer_comment: Optional[str] = None
     reviewed_at: Optional[datetime] = None
     final_status: Optional[str] = None
-
-    class Config:
-        from_attributes = True

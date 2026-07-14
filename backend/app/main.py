@@ -1,42 +1,28 @@
 import os
 import time
-import requests
-
 from datetime import datetime, timezone
 
-from fastapi.security import OAuth2PasswordRequestForm
-
-from app.auth import (
-    create_access_token,
-    verify_password,
-)
-from app.dependencies import (
-    get_current_user,
-    require_admin,
-)
-from app.services.storage import delete_receipt
-
+import requests
 from fastapi import (
+    Depends,
     FastAPI,
-    UploadFile,
     File,
     Form,
-    Depends,
     HTTPException,
+    UploadFile,
 )
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from app import models, schemas
-from app.database import engine, Base, get_db
+from app.auth import create_access_token, verify_password
+from app.database import Base, engine, get_db
+from app.dependencies import get_current_user, require_admin
 from app.services.duplicate import (
     calculate_bytes_hash,
     find_duplicate_by_hash,
     find_possible_duplicate_by_fields,
 )
-from app.services.image_quality import (
-    assess_image_quality_bytes,
-)
-
 from app.services.storage import (
     delete_receipt,
     download_receipt_bytes,
@@ -44,7 +30,6 @@ from app.services.storage import (
 )
 from app.services.verifier import verify_receipt
 from app.services.vision_extractor import extract_receipt_from_image
-from app.services.storage import upload_receipt
 
 
 def get_image_mime_type(image_url: str) -> str:
@@ -69,7 +54,7 @@ Base.metadata.create_all(bind=engine)
 
 @app.get("/")
 def root():
-    return {"message": "Receipt Verification OCR API is running"}
+    return {"message": "AI Receipt Verification API is running"}
 
 
 @app.get("/health")
@@ -165,10 +150,7 @@ def submit_receipt(
     image_hash = calculate_bytes_hash(file_bytes)
 
     try:
-        upload_result = upload_receipt(
-            file_bytes=file_bytes,
-            filename=original_filename,
-        )
+        upload_result = upload_receipt(file_bytes)
     except Exception as exc:
         raise HTTPException(
             status_code=502,
@@ -195,8 +177,6 @@ def submit_receipt(
 
         # Prevent orphaned Cloudinary image if database insert fails
         try:
-            from app.services.storage import delete_receipt
-
             delete_receipt(upload_result["public_id"])
         except Exception:
             pass
@@ -264,7 +244,11 @@ def get_receipt(
             detail="You cannot view this receipt",
         )
 
-    return receipt
+    response = schemas.ReceiptDetailResponse.model_validate(receipt)
+
+    return response.model_copy(
+        update={"image_url": receipt.image_path}
+    )
 
 
 @app.delete("/receipts/{receipt_id}")
@@ -353,21 +337,6 @@ def process_receipt(
                 "Downloaded receipt image is empty"
             )
 
-        # 2. Assess image quality using downloaded bytes
-        quality_result = assess_image_quality_bytes(
-            image_bytes
-        )
-
-        receipt.image_quality_score = (
-            quality_result["score"]
-        )
-
-        receipt.image_quality_flags = (
-            ", ".join(quality_result["flags"])
-            if quality_result["flags"]
-            else None
-        )
-
         # 3. Send the image bytes directly to Gemini Vision
         mime_type = get_image_mime_type(
             receipt.image_path
@@ -429,15 +398,7 @@ def process_receipt(
             claim_amount=receipt.claim_amount,
             extracted_total=receipt.extracted_total,
             receipt_date=receipt.receipt_date,
-            extraction_confidence=(
-                receipt.extraction_confidence
-            ),
-            image_quality_score=(
-                receipt.image_quality_score
-            ),
-            image_quality_flags=(
-                receipt.image_quality_flags
-            ),
+            extraction_confidence=receipt.extraction_confidence,
         )
 
         if exact_duplicate:

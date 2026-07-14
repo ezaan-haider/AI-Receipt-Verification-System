@@ -2,7 +2,6 @@ import pandas as pd
 import streamlit as st
 
 from api_client import (
-    API_BASE_URL,
     APIError,
     delete_receipt,
     get_all_receipts,
@@ -315,15 +314,15 @@ def render_receipt_detail(
     with left:
         st.subheader("Receipt image")
 
-        image_path = receipt["image_path"].replace(
-            "\\",
-            "/",
-        )
+        image_url = receipt.get("image_url") or receipt.get("image_path")
 
-        st.image(
-            f"{API_BASE_URL}/{image_path}",
-            use_container_width=True,
-        )
+        if image_url:
+            st.image(
+                image_url,
+                use_container_width=True,
+            )
+        else:
+            st.warning("Receipt image is unavailable.")
 
     with right:
         st.subheader("Extracted information")

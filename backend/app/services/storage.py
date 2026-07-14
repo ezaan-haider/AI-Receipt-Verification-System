@@ -15,7 +15,6 @@ cloudinary.config(
 
 def upload_receipt(
     file_bytes: bytes,
-    filename: str,
 ) -> dict:
     result = cloudinary.uploader.upload(
         file_bytes,
